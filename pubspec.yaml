@@ -1,0 +1,39 @@
+name: get_book_isbn
+description: A new Flutter project.
+
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: ">=2.15.0-126.0.dev <3.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  cupertino_icons: ^1.0.2
+  hooks_riverpod: ^0.14.0+5
+  flutter_hooks: ^0.18.0
+  url_launcher: ^6.0.12
+  dio: ^4.0.0
+  http: ^0.13.3
+  geolocator: ^7.6.2
+  flutter_spinkit: ^5.1.0
+  freezed_annotation: ^0.14.0
+
+
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+
+  flutter_lints: ^1.0.0
+  freezed: ^0.14.0
+  build_runner: ^2.1.4
+  json_serializable: ^4.0.0
+
+flutter:
+
+  uses-material-design: true
+
+
