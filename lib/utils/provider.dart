@@ -69,6 +69,17 @@ class InputTextState extends StateNotifier<String> {
   void changeState(newState) => state = newState;
 }
 
+final getRakutenAPIProvider = FutureProvider<List<BookFromRakuten>>((ref) async {
+
+  final bookTitle = ref.watch(inputTextProvider);
+  if (bookTitle == '') {
+    return [];
+  }
+  final repo = ref.read(testRepoProvider);
+  final result = await repo.getListSearchedTitle(bookTitle);
+  return result;
+});
+
 // 検索するISBN
 final getISBNProvider =
     StateNotifierProvider<GetISBNNotifier, String>((ref) => GetISBNNotifier());
@@ -79,33 +90,29 @@ class GetISBNNotifier extends StateNotifier<String> {
   void changeState(newISBN) => state = newISBN;
 }
 
-final testISBNProvider = Provider<String>((ref) {
-  return '';
-});
 
 // 検索結果を一気に取得する
-final testGetProvider = FutureProvider<List<LibraryModel>>((ref) async {
-  print('検索開始');
+final testGetProvider = FutureProvider.autoDispose<List<LibraryModel>>((ref) async {
+  print('-------検索開始------');
   final isbn = ref.watch(getISBNProvider);
-  if (isbn == '') {
-    print('空欄のため検索しない');
-    return [];
-  }
   final repo = ref.read(testRepoProvider);
   final Position position = await repo.getLocation();
-  final libraries = await repo.getLibraryFromPosition(position);
-  print('libraries.length = ${libraries.length}');
-  final libKeys = await repo.getSystemIdList(libraries);
-  print(libKeys);
-  final libData = await repo.searchBooksInLibraries(libKeys, isbn);
-  for (var lib in libData) {
-    print('libkey: ${lib.libkey}, status: ${lib.status}');
-  }
-  final libDataHasBook = await repo.getHasBookData(libData);
-  print(libDataHasBook);
-  final showLibraries = repo.getShowLibraries(libraries, libDataHasBook);
-  print(showLibraries);
-  print('検索完了');
+  final List<LibraryModel> libraries = await repo.getLibrariesUsePosition(position);
+  final List<String> systemIdList = await repo.getSystemIdList(libraries);
+
+  print('''
+  ---------検索前の情報-----------
+  isbn: $isbn,
+  Position: $position,
+  libraries: ${libraries.length}
+  systemIdList: ${systemIdList.length},
+  ''');
+  List<LibraryDataHasBook> bookDataResult = await repo.searchAllBookData(systemIdList, isbn);
+  bookDataResult = await repo.getDataOnlyHasBook(bookDataResult);
+  final List<LibraryModel> showLibraries = repo.getShowLibraries(libraries, bookDataResult);
+
+  print('-------検索完了------');
+  ref.maintainState = true;
   return showLibraries;
 });
 
@@ -115,31 +122,66 @@ final testRepoProvider = Provider((ref) {
 
 // 検索処理を定義したクラス
 class TestRepo {
+  // 楽天のAPIへリクエスト送信
+  Future<dynamic> getBookFromRakuten(String title) async {
+    var url = Uri.parse(
+        'https://app.rakuten.co.jp/services/api/BooksTotal/Search/20170404?format=json&keyword=$title&booksGenreId=001&hits=30&applicationId=$appId');
+    http.Response _response = await http.get(url);
+    if (_response.statusCode == 200) {
+      return jsonDecode(_response.body);
+    } else {
+      print('エラー発生。エラーコード：${_response.statusCode}');
+      return null;
+    }
+  }
+
+  // レスポンスをモデル化しリストに格納
+  Future<List<BookFromRakuten>> getListSearchedTitle(title) async {
+    final data = await getBookFromRakuten(title);
+    final items = data['Items'];
+    List<BookFromRakuten> result = [];
+    for (var item in items) {
+      result.add(
+        BookFromRakuten(
+          imageURL: item['Item']['mediumImageUrl'],
+          title: item['Item']['title'],
+          isbn: item['Item']['isbn'],
+        ),
+      );
+    }
+
+    // 更新
+    return result ;
+  }
+
   Future<Position> getLocation() async {
     Position position = await Geolocator.getCurrentPosition(
-        desiredAccuracy: LocationAccuracy.medium);
+        desiredAccuracy: LocationAccuracy.low);
     return position;
   }
 
-  Future<List<LibraryModel>> getLibraryFromPosition(Position position) async {
-    // 何故かGPSの値がおかしい。治るまで手動で指定している
-    // final longitude = position.longitude;
-    // final latitude = position.latitude;
-
-    final dynamic getLibraryData;
+  // GPS周辺の図書館のjsonデータ取得
+  Future<dynamic> getLibrariesJsonDataUsePosition(Position position) async {
+    //final longitude = position.longitude;
+    final longitude = 139.3869;
+    //final latitude = position.latitude;
+    final latitude = 35.5640;
     var url = Uri.parse(
         'https://api.calil.jp/library?appkey=$apiKey&geocode=$longitude,$latitude&limit=$searchLibraryCount&callback=&format=json');
     http.Response _response = await http.get(url);
     if (_response.statusCode == 200) {
-      getLibraryData = jsonDecode(_response.body);
+      return jsonDecode(_response.body);
     } else {
       print('エラー発生。エラーコード：${_response.statusCode}');
-      getLibraryData = null;
+      return null;
     }
+  }
 
-    // モデル化してリストに格納
+  // GPS周辺の図書館のjsonデータをモデル化しリストに格納
+  Future<List<LibraryModel>> getLibrariesUsePosition(Position position) async {
+    final libraryData = await getLibrariesJsonDataUsePosition(position);
     List<LibraryModel> list = [];
-    for (var lib in getLibraryData) {
+    for (var lib in libraryData) {
       list.add(
         LibraryModel(
           systemName: lib['systemname'],
@@ -159,11 +201,10 @@ class TestRepo {
         ),
       );
     }
-    // 更新
     return list;
   }
 
-  // システムIDの種類をリストに格納
+// システムIDの種類をリストに格納
   Future<List<String>> getSystemIdList(List<LibraryModel> libraries) async {
     List<String> list = [];
     for (var lib in libraries) {
@@ -172,14 +213,30 @@ class TestRepo {
     return list.toSet().toList();
   }
 
+// システムIDを使って本を検索しモデル化してリストを更新
+  Future<List<LibraryDataHasBook>> searchAllBookData(List<String> systemIdList, String isbn) async {
+    List<LibraryDataHasBook> list = [];
+    final response = await getCompletedLoadingSearchResult(systemIdList, isbn);
+    var index = 0;
+    for (var data in response) {
+      var libKey = systemIdList[index];
+      list.add(LibraryDataHasBook(
+          systemId: libKey,
+          status: data['books'][isbn][libKey]['status'],
+          libkey: data['books'][isbn][libKey]['libkey'],
+          url: data['books'][isbn][libKey]['reserveurl']));
+      index ++;
+    }
+    return list;
+  }
+
   // ISNBを使って図書館を検索
-// sessionの有無でURLが変わる
   Future<dynamic> getLibraryUseISNB(
-      {required String systemId, required String isbn, String? session}) async {
+      {String? isbn, String? systemId, String? session}) async {
     Uri url;
-    if (session != null) {
+    if (session != null && systemId == null && isbn == null) {
       url = Uri.parse(
-          'https://api.calil.jp/check?session=$session&appkey=$apiKey&isbn=$isbn&systemid=$systemId&format=json&callback=no');
+          'https://api.calil.jp/check?session=$session&format=json&callback=no');
     } else {
       url = Uri.parse(
           'https://api.calil.jp/check?appkey=$apiKey&isbn=$isbn&systemid=$systemId&format=json&callback=no');
@@ -193,90 +250,48 @@ class TestRepo {
     }
   }
 
-  // 検索結果の中で本がある図書館のデータのみに絞り込んでリストを更新
-  Future<List<LibraryDataHasBook>> getHasBookData(
-      List<LibraryDataHasBook> librariesHasBook) async {
-    return librariesHasBook
-        .where((lib) => lib.status != "Error" && lib.libkey!.values.isNotEmpty)
-        .toList();
-  }
-
-  // 読み込みが完了した状態で検索結果を取得
-  Future<dynamic> getCompletedLibraryFromISNB({
-    required String isbn,
-    required List<String> libKeys,
-  }) async {
+  // ロードが完了した図書館のjsonデータ
+  Future<dynamic> getCompletedLoadingSearchResult(List<String> systemIdList, String isbn) async {
     var results = [];
-
-    for (var libKey in libKeys) {
-      final response = await getLibraryUseISNB(isbn: isbn, systemId: libKey);
+    for (var systemId in systemIdList) {
+      final response = await getLibraryUseISNB(isbn: isbn,systemId: systemId);
       results.add(response);
     }
 
     while (results.where((result) => result['continue'] == 1).isNotEmpty) {
-      await Future.delayed(const Duration(seconds: 2));
-      results.asMap().forEach((index, result) async {
+      print('continue = 1 のため再取得開始');
+      await Future.delayed(const Duration(seconds: 3));
+      int index = 0;
+      for (var result in results) {
         if (result['continue'] == 1) {
-          results[index] = await getLibraryUseISNB(
-              isbn: isbn, systemId: result['id'], session: result['session']);
+          results[index] = await getLibraryUseISNB(session: result['session']);
         }
-      });
-
+        index++;
+      }
     }
-
-
     return results;
-    // var getData = await getLibraryUseISNB(systemId: systemId, isbn: isbn);
-    // // continueが1(読み込み中)の場合は再度検索する
-    // while (getData['continue'] == 1) {
-    //   getData = await getLibraryUseISNB(
-    //       systemId: systemId,isbn: isbn, session: getData['session']);
-    // }
-    // return getData;
   }
 
-  // システムIDを使って本を検索しモデル化してリストを更新
-  Future<List<LibraryDataHasBook>> searchBooksInLibraries(
-      List<String> libKeys, String isbn) async {
-    List<LibraryDataHasBook> list = [];
-    final response =
-        await getCompletedLibraryFromISNB(isbn: isbn, libKeys: libKeys);
-    var index = 0;
-    for (var data in response) {
-      var libKey = libKeys[index];
-      list.add(LibraryDataHasBook(
-          systemId: libKey,
-          status: data['books'][isbn][libKey]['status'],
-          libkey: data['books'][isbn][libKey]['libkey'],
-          url: data['books'][isbn][libKey]['reserveurl']));
-      index++;
-    }
-    return list;
-    // List<LibraryDataHasBook> list = [];
-    // for (var systemId in libKeys) {
-    //   var library =
-    //       await getCompletedLibraryFromISNB(isbn: isbn, systemId: systemId);
-    //   list.add(LibraryDataHasBook(
-    //       systemId: systemId,
-    //       status: library['books'][isbn][systemId]['status'],
-    //       libkey: library['books'][isbn][systemId]['libkey'],
-    //       url: library['books'][isbn][systemId]['reserveurl']));
-    // }
-    // return list;
+// 検索結果の中で本がある図書館のデータのみに絞り込んでリストを更新
+  Future<List<LibraryDataHasBook>> getDataOnlyHasBook(List<LibraryDataHasBook> data) async {
+    return data
+        .where((lib) => lib.status != "Error" && lib.libkey!.values.isNotEmpty)
+        .toList();
   }
 
-  // 周辺の図書館から本がある図書館を探してリスト化し表示
-  List<LibraryModel> getShowLibraries(
-      List<LibraryModel> libraries, List<LibraryDataHasBook> hasBookData) {
+// 周辺の図書館から本がある図書館を探してリスト化し表示
+  List<LibraryModel> getShowLibraries(List<LibraryModel> libraries, List<LibraryDataHasBook> bookDataResult) {
     List<LibraryModel> list = [];
     for (var lib in libraries) {
-      for (var data in hasBookData) {
-        String libkeyName = data.libkey!.keys.cast<String>().first;
-        if (lib.systemId == data.systemId && lib.libkey == libkeyName) {
-          lib.status = data.libkey;
-          lib.bookPageURL = data.url;
-
-          list.add(lib);
+      for (var data in bookDataResult) {
+        if (lib.systemId == data.systemId ){
+          data.libkey!.forEach((key, value) {
+            if (lib.libkey == key) {
+              lib.status = value;
+              lib.bookPageURL = data.url;
+              list.add(lib);
+            }
+          });
         }
       }
     }
@@ -285,42 +300,42 @@ class TestRepo {
 }
 
 // 楽天APIに対するプロバイダーとNotifier。これは正常に動く。
-final getBookFromRakutenProvider =
-    StateNotifierProvider<GetBookFromRakutenState, List<BookFromRakuten>>(
-        (ref) => GetBookFromRakutenState());
-
-class GetBookFromRakutenState extends StateNotifier<List<BookFromRakuten>> {
-  GetBookFromRakutenState() : super([]);
-
-  // 楽天のAPIへリクエスト送信
-  Future<dynamic> getBookFromRakuten(String title) async {
-    var url = Uri.parse(
-        'https://app.rakuten.co.jp/services/api/BooksTotal/Search/20170404?format=json&keyword=$title&booksGenreId=001&hits=10&applicationId=$appId');
-    http.Response _response = await http.get(url);
-    if (_response.statusCode == 200) {
-      return jsonDecode(_response.body);
-    } else {
-      print('エラー発生。エラーコード：${_response.statusCode}');
-      return null;
-    }
-  }
-
-  // レスポンスをモデル化しリストに格納
-  Future<void> getListSearchedTitle(title) async {
-    final data = await getBookFromRakuten(title);
-    final items = data['Items'];
-    List<BookFromRakuten> result = [];
-    for (var item in items) {
-      result.add(
-        BookFromRakuten(
-          imageURL: item['Item']['mediumImageUrl'],
-          title: item['Item']['title'],
-          isbn: item['Item']['isbn'],
-        ),
-      );
-    }
-
-    // 更新
-    state = result;
-  }
-}
+// final getBookFromRakutenProvider =
+//     StateNotifierProvider<GetBookFromRakutenState, AsyncValue<List<BookFromRakuten>>>(
+//         (ref) => GetBookFromRakutenState());
+//
+// class GetBookFromRakutenState extends StateNotifier<AsyncValue<List<BookFromRakuten>>> {
+//   GetBookFromRakutenState() : super([] as AsyncValue<List<BookFromRakuten>>);
+//
+//   // 楽天のAPIへリクエスト送信
+//   Future<dynamic> getBookFromRakuten(String title) async {
+//     var url = Uri.parse(
+//         'https://app.rakuten.co.jp/services/api/BooksTotal/Search/20170404?format=json&keyword=$title&booksGenreId=001&hits=30&applicationId=$appId');
+//     http.Response _response = await http.get(url);
+//     if (_response.statusCode == 200) {
+//       return jsonDecode(_response.body);
+//     } else {
+//       print('エラー発生。エラーコード：${_response.statusCode}');
+//       return null;
+//     }
+//   }
+//
+//   // レスポンスをモデル化しリストに格納
+//   Future<void> getListSearchedTitle(title) async {
+//     final data = await getBookFromRakuten(title);
+//     final items = data['Items'];
+//     List<BookFromRakuten> result = [];
+//     for (var item in items) {
+//       result.add(
+//         BookFromRakuten(
+//           imageURL: item['Item']['mediumImageUrl'],
+//           title: item['Item']['title'],
+//           isbn: item['Item']['isbn'],
+//         ),
+//       );
+//     }
+//
+//     // 更新
+//     state = result as AsyncValue<List<BookFromRakuten>>;
+//   }
+// }

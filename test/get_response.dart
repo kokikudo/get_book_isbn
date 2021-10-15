@@ -4,11 +4,10 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:get_book_isbn/models/library_model.dart';
 import 'package:get_book_isbn/models/book_data.dart';
 import 'package:http/http.dart' as http;
-import 'package:geolocator/geolocator.dart';
 import 'package:get_book_isbn/models/library_data_has_book.dart';
 
 const appId = '1081246808762900104';
-const appSecret = '17b52523544c54c05dfd4ee9f0a6b81e5ad59352';
+//const appSecret = '17b52523544c54c05dfd4ee9f0a6b81e5ad59352';
 const apiKey = 'AIzaSyCAsSKKnbVWfIcDd1F-DmVMgF0fWJSCt60';
 const latitude = '35.56401833333334';
 const longitude = '139.386895';
@@ -19,7 +18,7 @@ String isbn = '9784478025819';
 List<BookFromRakuten> searchedBooks = [];
 List<String> systemIdList = [];
 List<LibraryModel> libraries = [];
-List<LibraryDataHasBook> testLibrariesHasBookData = [];
+List<LibraryDataHasBook> bookDataResult = [];
 List<LibraryModel> showLibraries = [];
 
 // 本のタイトル　→　楽天APIの結果
@@ -52,60 +51,8 @@ Future<void> getListSearchedTitle() async {
   searchedBooks = result;
 }
 
-// ISNBを使って図書館を検索
-// sessionの有無でURLが変わる
-Future<dynamic> getLibraryUseISNB(
-    {required String systemId, String? session}) async {
-  Uri url;
-  if (session != null) {
-    url = Uri.parse(
-        'https://api.calil.jp/check?session=$session&appkey=$apiKey&isbn=$isbn&systemid=$systemId&format=json&callback=no');
-  } else {
-    url = Uri.parse(
-        'https://api.calil.jp/check?appkey=$apiKey&isbn=$isbn&systemid=$systemId&format=json&callback=no');
-  }
-  http.Response _response = await http.get(url);
-  if (_response.statusCode == 200) {
-    return jsonDecode(_response.body);
-  } else {
-    print('エラー発生。エラーコード：${_response.statusCode}');
-    return null;
-  }
-}
-
-// 読み込みが完了した状態で検索結果を取得
-Future<dynamic> getCompletedLibraryFromISNB({
-  required String isbn,
-  required String systemId,
-}) async {
-  var getData = await getLibraryUseISNB(systemId: systemId);
-  // continueが1(読み込み中)の場合は再度検索する
-  while (getData['continue'] == 1) {
-    getData = await getLibraryUseISNB(
-        systemId: systemId, session: getData['session']);
-  }
-  return getData;
-}
-
-Future<dynamic> newGetLibrariesFromISBN(List<String> libKeys) async {
-  var results = [];
-  for (var libKey in libKeys) {
-    final response = await getLibraryUseISNB(systemId: libKey);
-    results.add(response);
-  }
-
-  results.asMap().forEach((index, result) async {
-    if (result['continue'] == 1) {
-      results[index] = await getLibraryUseISNB(
-          systemId: result['id'], session: result['session']);
-    }
-  });
-
-  return results;
-}
-
-// GPS周辺の図書館のデータを取得
-Future<dynamic> getLibraryFromPosition() async {
+// GPS周辺の図書館のjsonデータ取得
+Future<dynamic> getLibrariesJsonDataUsePosition() async {
   var url = Uri.parse(
       'https://api.calil.jp/library?appkey=$apiKey&geocode=$longitude,$latitude&limit=$searchLibraryCount&callback=&format=json');
   http.Response _response = await http.get(url);
@@ -117,9 +64,9 @@ Future<dynamic> getLibraryFromPosition() async {
   }
 }
 
-// GPS周辺の図書館のデータをモデル化しリストに格納
-Future<dynamic> testGetLibraryFromPosition() async {
-  final libraryData = await getLibraryFromPosition();
+// GPS周辺の図書館のjsonデータをモデル化しリストに格納
+Future<void> getLibrariesUsePosition() async {
+  final libraryData = await getLibrariesJsonDataUsePosition();
   List<LibraryModel> list = [];
   for (var lib in libraryData) {
     list.add(
@@ -147,18 +94,56 @@ Future<dynamic> testGetLibraryFromPosition() async {
 // システムIDの種類をリストに格納
 Future<void> getSystemIdList() async {
   List<String> list = [];
-  await testGetLibraryFromPosition();
+  await getLibrariesUsePosition();
   for (var lib in libraries) {
     list.add(lib.systemId);
   }
   systemIdList = list.toSet().toList();
 }
 
+// ISNBを使って図書館を検索
+Future<dynamic> getLibraryUseISNB({String? systemId, String? session}) async {
+  Uri url;
+  if (session != null && systemId == null) {
+    url = Uri.parse(
+        'https://api.calil.jp/check?session=$session&format=json&callback=no');
+  } else {
+    url = Uri.parse(
+        'https://api.calil.jp/check?appkey=$apiKey&isbn=$isbn&systemid=$systemId&format=json&callback=no');
+  }
+  http.Response _response = await http.get(url);
+  if (_response.statusCode == 200) {
+    return jsonDecode(_response.body);
+  } else {
+    print('エラー発生。エラーコード：${_response.statusCode}');
+    return null;
+  }
+}
+// 全てのレスポンスのロードが完了するまで再ロードする
+Future<dynamic> getCompletedLoadingSearchResult() async {
+  var results = [];
+  for (var systemId in systemIdList) {
+    final response = await getLibraryUseISNB(systemId: systemId);
+    results.add(response);
+  }
+
+  while (results.where((result) => result['continue'] == 1).isNotEmpty) {
+    print('continue = 1 のため再取得開始');
+    await Future.delayed(const Duration(seconds: 5));
+    results.asMap().forEach((index, result) async {
+      if (result['continue'] == 1) {
+        results[index] = await getLibraryUseISNB(session: result['session']);
+      }
+    });
+  }
+
+  return results;
+}
+
 // システムIDを使って本を検索しモデル化してリストを更新
-Future<void> searchBooksInLibraries() async {
-  await getSystemIdList();
+Future<void> searchAllBookData() async {
   List<LibraryDataHasBook> list = [];
-  final response = await newGetLibrariesFromISBN(systemIdList);
+  final response = await getCompletedLoadingSearchResult();
   var index = 0;
   for (var data in response) {
     var libKey = systemIdList[index];
@@ -167,24 +152,14 @@ Future<void> searchBooksInLibraries() async {
         status: data['books'][isbn][libKey]['status'],
         libkey: data['books'][isbn][libKey]['libkey'],
         url: data['books'][isbn][libKey]['reserveurl']));
-    index ++;
+    index++;
   }
-  // for (var systemId in systemIdList) {
-  //   var library =
-  //       await getCompletedLibraryFromISNB(isbn: isbn, systemId: systemId);
-  //   list.add(LibraryDataHasBook(
-  //       systemId: systemId,
-  //       status: library['books'][isbn][systemId]['status'],
-  //       libkey: library['books'][isbn][systemId]['libkey'],
-  //       url: library['books'][isbn][systemId]['reserveurl']));
-  // }
-  testLibrariesHasBookData = list;
+  bookDataResult = list;
 }
 
 // 検索結果の中で本がある図書館のデータのみに絞り込んでリストを更新
-Future<void> getHasBookData() async {
-  await searchBooksInLibraries();
-  testLibrariesHasBookData = testLibrariesHasBookData
+Future<void> getDataOnlyHasBook() async {
+  bookDataResult = bookDataResult
       .where((lib) => lib.status != "Error" && lib.libkey!.values.isNotEmpty)
       .toList();
 }
@@ -193,13 +168,18 @@ Future<void> getHasBookData() async {
 void getShowLibraries() {
   List<LibraryModel> list = [];
   for (var lib in libraries) {
-    for (var data in testLibrariesHasBookData) {
-      String libkeyName = data.libkey!.keys.cast<String>().first;
-      if (lib.systemId == data.systemId && lib.libkey == libkeyName) {
-        lib.status = data.libkey;
-        lib.bookPageURL = data.url;
-
-        list.add(lib);
+    for (var data in bookDataResult) {
+      if (lib.systemId == data.systemId) {
+        print('id一致したよ');
+        data.libkey!.forEach((key, value) {
+          if (lib.libkey == key) {
+            lib.status = value;
+            lib.bookPageURL = data.url;
+            list.add(lib);
+          }
+        });
+      } else {
+        print('id一致してないよー；；');
       }
     }
   }
@@ -234,7 +214,7 @@ void main() {
   });
 
   test('GPSをもとに周辺にある図書館のデータ取得', () async {
-    final result = await getLibraryFromPosition();
+    final result = await getLibrariesJsonDataUsePosition();
     expect(result, isNotNull);
 
     expect(result[0]['formal'], '相模原市立図書館');
@@ -251,17 +231,17 @@ void main() {
   });
 
   test('システムIDごと本の検索結果', () async {
-    await searchBooksInLibraries();
-    for (var lib in testLibrariesHasBookData) {
+    await searchAllBookData();
+    for (var lib in bookDataResult) {
       print(
           'id: ${lib.systemId}, status: ${lib.status}, url: ${lib.url}, libkey: ${lib.libkey}');
     }
   });
 
   test('システムIDごとにお目当ての本があるか検索', () async {
-    await searchBooksInLibraries();
-    await getHasBookData();
-    testLibrariesHasBookData.asMap().forEach((int i, LibraryDataHasBook data) {
+    await searchAllBookData();
+    await getDataOnlyHasBook();
+    bookDataResult.asMap().forEach((int i, LibraryDataHasBook data) {
       print('${i + 1}-----------');
       print("""
       id: ${data.systemId},
@@ -273,7 +253,7 @@ void main() {
   });
 
   test('GPS周辺の図書館を取得しデータモデル化する', () async {
-    await testGetLibraryFromPosition();
+    await getLibrariesUsePosition();
 
     libraries.asMap().forEach((int i, LibraryModel lib) {
       print('no.${i + 1}----------');
@@ -289,8 +269,8 @@ void main() {
   });
 
   test('GPS周辺の図書館から本が置いてある図書館を取得', () async {
-    await searchBooksInLibraries();
-    await getHasBookData();
+    await searchAllBookData();
+    await getDataOnlyHasBook();
 
     getShowLibraries();
     for (var lib in showLibraries) {
@@ -308,19 +288,97 @@ void main() {
   });
 
   test('周辺の図書館をモデル化しリストで取得', () async {
-    await testGetLibraryFromPosition();
+    await getLibrariesUsePosition();
     print(libraries[0].formalName);
   });
 
   test('先にロード中の結果も含めたレスポンスを取得し、後でロード中のレスポンスだけ再リクエストする', () async {
-
-    await searchBooksInLibraries();
-    for (var lib in testLibrariesHasBookData) {
+    await searchAllBookData();
+    for (var lib in bookDataResult) {
       print('''
       ----------------
       ${lib.systemId}, ${lib.status}, ${lib.libkey}, ${lib.url}
       ''');
-
     }
+  });
+
+  test('システムIDごとに本の検索', () async {
+    systemIdList = [
+      'Kanagawa_Sagamihara',
+      'Univ_Azabu',
+      'Special_Jaxa',
+      'Univ_Aoyamagakuin',
+      'Univ_Kitasato',
+      'Univ_Obirin',
+      'Univ_Joshibi',
+      'Tokyo_Machida',
+      'Univ_Yamazaki',
+      'Tokyo_Hachioji',
+      'Univ_Tmu',
+      'Univ_Otsuma',
+      'Univ_Salesio',
+      'Tokyo_Tama',
+      'Univ_Sagami_Wu',
+      'Univ_Tamabi',
+      'Kanagawa_Atsugi',
+      'Kanagawa_Zama',
+      'Univ_Toyaku',
+      'Univ_Keisen',
+      'Univ_Chuo',
+      'Univ_Yamano',
+      'Tokyo_Hino',
+      'Kanagawa_Aikawa',
+      'Univ_Teu',
+      'Univ_Meisei',
+      'Univ_Zokei',
+      'Univ_Teikyo',
+      'Univ_Kokushikan',
+      'Kanagawa_Yamato',
+      'Univ_Kait',
+      'Univ_Nms',
+      'Kanagawa_Ebina',
+      'Univ_Tamagawa',
+      'Univ_Jissen'
+    ];
+
+    await searchAllBookData();
+    bookDataResult.asMap().forEach((int i, LibraryDataHasBook data) {
+      print('no.${i + 1}----------');
+      print("""
+      systemid: ${data.systemId}
+      status: ${data.status}
+      url: ${data.url}
+      libkey: ${data.libkey}
+      """);
+    });
+  });
+
+  test('周辺の図書館の取得〜本がある図書館を表示まで一致に処理する', () async {
+    await getLibrariesUsePosition();
+    await getSystemIdList();
+    print(systemIdList);
+    isbn = '4776209470';
+    await searchAllBookData();
+    await getDataOnlyHasBook();
+    bookDataResult.asMap().forEach((int i, LibraryDataHasBook data) {
+      print('no.${i + 1}----------');
+      print("""
+      systemid: ${data.systemId}
+      status: ${data.status}
+      url: ${data.url}
+      libkey: ${data.libkey}
+      """);
+    });
+    getShowLibraries();
+    print('--------図書館別に表示-----------');
+    showLibraries.asMap().forEach((int i, LibraryModel lib) {
+      print('no.${i + 1}----------');
+      print("""
+      systemid: ${lib.systemId}
+      status: ${lib.status}
+      url: ${lib.bookPageURL}
+      libkey: ${lib.libkey}
+      """);
+    });
   });
 }

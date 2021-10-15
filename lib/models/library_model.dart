@@ -37,6 +37,6 @@ class LibraryModel {
   final String category;
   final double distance;
   String? image;
-  Map<String, dynamic>? status;
+  String? status;
   String? bookPageURL;
 }
