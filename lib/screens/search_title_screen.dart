@@ -17,7 +17,6 @@ class TitleSearchScreen extends HookWidget {
 
   @override
   Widget build(BuildContext context) {
-    final _inputTitle = useProvider(inputTextProvider); // 入力中の本のタイトル
     final _resultList = useProvider(getRakutenAPIProvider); // 検索結果のリスト
 
     return Scaffold(
@@ -34,7 +33,7 @@ class TitleSearchScreen extends HookWidget {
                     ),
                     Expanded(
                       child: TextField(
-                        keyboardType: TextInputType.name,
+                        textInputAction: TextInputAction.search,
                         onSubmitted: (value) {
                           // 検索したい本のタイトルの入力情報を更新
                           context

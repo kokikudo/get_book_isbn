@@ -32,8 +32,6 @@ class ResultScreen extends HookWidget {
                     final longitude = library.geocode.split(',')[1];
 
                     final urlToGoogleMap = 'https://www.google.com/maps/search/?api=1&query=$longitude,$latitude';
-                    // final urlToGoogleMap =
-                    //     'https://www.google.com/maps/search/?api=1&query=${library.post}+${library.address}';
                     return Card(
                       child: Column(
                         children: [
