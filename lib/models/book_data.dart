@@ -1,6 +1,5 @@
 import 'package:freezed_annotation/freezed_annotation.dart';
 import 'package:flutter/foundation.dart';
-
 part 'book_data.freezed.dart';
 
 class BookFromRakuten {
