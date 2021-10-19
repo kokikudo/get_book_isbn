@@ -38,6 +38,22 @@ class GetISBNNotifier extends StateNotifier<String> {
   void changeState(newISBN) => state = newISBN;
 }
 
+// 検索する本の画像URL
+final bookStatusProvider =
+    StateNotifierProvider<BookStatusNotifier, BookFromRakuten>(
+        (ref) => BookStatusNotifier());
+
+class BookStatusNotifier extends StateNotifier<BookFromRakuten> {
+  BookStatusNotifier()
+      : super(BookFromRakuten(imageURL: '', title: '', isbn: ''));
+
+  void changeState(
+          {required String imageURL,
+          required String title,
+          required String isbn}) =>
+      state = BookFromRakuten(imageURL: imageURL, title: title, isbn: isbn);
+}
+
 final testGetProvider =
     FutureProvider.autoDispose<List<LibraryModel>>((ref) async {
   // キャンセルトークンの設定
@@ -45,7 +61,7 @@ final testGetProvider =
   ref.onDispose(() => token.cancel('キャンセルされました。'));
 
   print('-------検索開始------');
-  final isbn = ref.watch(getISBNProvider);
+  final isbn = ref.read(getISBNProvider);
   final repo = ref.read(testRepoProvider);
   final Position position = await repo.getLocation();
   final List<LibraryModel> libraries =
@@ -197,12 +213,6 @@ class TestRepo {
     }
     var _response = await Dio().get(url, cancelToken: token);
     return _response.data;
-    if (_response.statusCode == 200) {
-      return jsonDecode(_response.data);
-    } else {
-      print('エラー発生。エラーコード：${_response.statusCode}');
-      return null;
-    }
   }
 
   // ロードが完了した図書館のjsonデータ
@@ -210,7 +220,8 @@ class TestRepo {
       List<String> systemIdList, String isbn, CancelToken token) async {
     var results = [];
     for (var systemId in systemIdList) {
-      final response = await getLibraryUseISNB(isbn: isbn, systemId: systemId, token: token);
+      final response =
+          await getLibraryUseISNB(isbn: isbn, systemId: systemId, token: token);
       results.add(response);
     }
 
@@ -220,7 +231,8 @@ class TestRepo {
       int index = 0;
       for (var result in results) {
         if (result['continue'] == 1) {
-          results[index] = await getLibraryUseISNB(session: result['session'], token: token);
+          results[index] =
+              await getLibraryUseISNB(session: result['session'], token: token);
         }
         index++;
       }
