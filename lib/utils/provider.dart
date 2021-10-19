@@ -38,8 +38,6 @@ class GetISBNNotifier extends StateNotifier<String> {
   void changeState(newISBN) => state = newISBN;
 }
 
-
-// 検索結果を一気に取得する
 final testGetProvider =
     FutureProvider.autoDispose<List<LibraryModel>>((ref) async {
   // キャンセルトークンの設定
@@ -48,7 +46,7 @@ final testGetProvider =
 
   print('-------検索開始------');
   final isbn = ref.watch(getISBNProvider);
-  final repo = ref.watch(testRepoProvider);
+  final repo = ref.read(testRepoProvider);
   final Position position = await repo.getLocation();
   final List<LibraryModel> libraries =
       await repo.getLibrariesUsePosition(position);
@@ -212,7 +210,7 @@ class TestRepo {
       List<String> systemIdList, String isbn, CancelToken token) async {
     var results = [];
     for (var systemId in systemIdList) {
-      final response = await getLibraryUseISNB(isbn: isbn, systemId: systemId);
+      final response = await getLibraryUseISNB(isbn: isbn, systemId: systemId, token: token);
       results.add(response);
     }
 
@@ -222,7 +220,7 @@ class TestRepo {
       int index = 0;
       for (var result in results) {
         if (result['continue'] == 1) {
-          results[index] = await getLibraryUseISNB(session: result['session']);
+          results[index] = await getLibraryUseISNB(session: result['session'], token: token);
         }
         index++;
       }
