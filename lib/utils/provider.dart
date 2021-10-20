@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:dio/dio.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:get_book_isbn/screens/result_screen.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:get_book_isbn/models/book_data.dart';
 import 'package:get_book_isbn/models/library_data_has_book.dart';
@@ -38,7 +39,7 @@ class GetISBNNotifier extends StateNotifier<String> {
   void changeState(newISBN) => state = newISBN;
 }
 
-// 検索する本の画像URL
+// 検索する本
 final bookStatusProvider =
     StateNotifierProvider<BookStatusNotifier, BookFromRakuten>(
         (ref) => BookStatusNotifier());
@@ -61,13 +62,12 @@ final testGetProvider =
   ref.onDispose(() => token.cancel('キャンセルされました。'));
 
   print('-------検索開始------');
-  final isbn = ref.read(getISBNProvider);
+  final isbn = ref.watch(getISBNProvider);
   final repo = ref.read(testRepoProvider);
   final Position position = await repo.getLocation();
   final List<LibraryModel> libraries =
       await repo.getLibrariesUsePosition(position);
   final List<String> systemIdList = await repo.getSystemIdList(libraries);
-
   print('''
   ---------検索前の情報-----------
   isbn: $isbn,
@@ -86,11 +86,15 @@ final testGetProvider =
 });
 
 final testRepoProvider = Provider((ref) {
-  return TestRepo();
+  return TestRepo(ref.read);
 });
 
 // 検索処理を定義したクラス
 class TestRepo {
+  TestRepo(this._read);
+
+  Reader _read;
+
   // 楽天のAPIへリクエスト送信
   Future<dynamic> getBookFromRakuten(String title) async {
     var url = Uri.parse(
@@ -215,6 +219,18 @@ class TestRepo {
     return _response.data;
   }
 
+  // ロードが完了したデータの割合をインジケーターの値にする
+  void updateIndicatorValue(List<dynamic> results) {
+    // 全ロードデータの個数
+    final allDataCount = results.length;
+    // ロード完了のデータ個数
+    final completeDataCount = results.where((result) => result['continue'] == 0).length;
+    // ロード完了のデータの割合
+    final dataRateCompletedLoad = completeDataCount / allDataCount;
+    // 割合をインジケータの値にする
+    _read(progressValueProvider.notifier).changeState(dataRateCompletedLoad);
+  }
+
   // ロードが完了した図書館のjsonデータ
   Future<dynamic> getCompletedLoadingSearchResult(
       List<String> systemIdList, String isbn, CancelToken token) async {
@@ -227,7 +243,7 @@ class TestRepo {
 
     while (results.where((result) => result['continue'] == 1).isNotEmpty) {
       print('continue = 1 のため再取得開始');
-      await Future.delayed(const Duration(seconds: 3));
+      await Future.delayed(const Duration(seconds: 5));
       int index = 0;
       for (var result in results) {
         if (result['continue'] == 1) {
@@ -235,8 +251,10 @@ class TestRepo {
               await getLibraryUseISNB(session: result['session'], token: token);
         }
         index++;
+        updateIndicatorValue(results);
       }
     }
+
     return results;
   }
 

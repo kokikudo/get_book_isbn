@@ -1,13 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
-import 'package:get_book_isbn/models/book_data.dart';
-import 'package:get_book_isbn/screens/result_screen.dart';
 import 'package:get_book_isbn/utils/provider.dart';
-import 'package:get_book_isbn/widgets/book_image_widget.dart';
 import 'package:get_book_isbn/widgets/title_search_result_card.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:flutter_hooks/flutter_hooks.dart';
+import 'package:url_launcher/url_launcher.dart';
 
+///TODO ロードの進行状況がわかるゲージを導入する
 class TitleSearchScreen extends HookWidget {
   const TitleSearchScreen({Key? key}) : super(key: key);
 
@@ -26,32 +25,34 @@ class TitleSearchScreen extends HookWidget {
         child: Column(
           children: [
             Padding(
-                padding: const EdgeInsets.all(20.0),
-                child: Row(
-                  children: [
-                    IconButton(
-                      onPressed: () => getLocation(),
-                      icon: Icon(Icons.search),
+              padding: const EdgeInsets.all(20.0),
+              child: Row(
+                children: [
+                  IconButton(
+                    onPressed: () => getLocation(),
+                    icon: Icon(Icons.search),
+                  ),
+                  Expanded(
+                    child: TextField(
+                      textInputAction: TextInputAction.search,
+                      onSubmitted: (value) {
+                        // 検索したい本のタイトルの入力情報を更新
+                        context
+                            .read(inputTextProvider.notifier)
+                            .changeState(value);
+                      },
                     ),
-                    Expanded(
-                      child: TextField(
-                        textInputAction: TextInputAction.search,
-                        onSubmitted: (value) {
-                          // 検索したい本のタイトルの入力情報を更新
-                          context
-                              .read(inputTextProvider.notifier)
-                              .changeState(value);
-                        },
-                      ),
-                    ),
-                    IconButton(
-                      onPressed: () async {},
-                      icon: Icon(Icons.qr_code_scanner),
-                    ),
-                  ],
-                )),
-            SizedBox(
-              height: 10,
+                  ),
+                  IconButton(
+                    onPressed: () async {},
+                    icon: Icon(Icons.qr_code_scanner),
+                  ),
+                ],
+              ),
+            ),
+            TextButton(
+              onPressed: () => launch("https://webservice.rakuten.co.jp/"),
+              child: Text('Supported by Rakuten Developers'),
             ),
             Expanded(
                 child: _resultList.when(

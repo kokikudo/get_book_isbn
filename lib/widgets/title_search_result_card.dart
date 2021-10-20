@@ -16,7 +16,6 @@ class TitleSearchResultCard extends HookWidget {
 
   @override
   Widget build(BuildContext context) {
-    final bookStatus = useProvider(bookStatusProvider);
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(15.0),
@@ -34,7 +33,6 @@ class TitleSearchResultCard extends HookWidget {
                   ),
                   Text(book.isbn),
 
-                  // 検索処理を実行するボタン
                   TextButton(
                     onPressed: () {
                       context.read(bookStatusProvider.notifier).changeState(
@@ -48,17 +46,6 @@ class TitleSearchResultCard extends HookWidget {
                             builder: (context) => BookDetailsScreen()),
                       );
 
-                      // ISBN番号の更新
-                      // context
-                      //     .read(getISBNProvider.notifier)
-                      //     .changeState(books.isbn);
-                      //
-                      // Navigator.push(
-                      //   context,
-                      //   MaterialPageRoute(
-                      //     builder: (context) => ResultScreen(),
-                      //   ),
-                      // );
                     },
                     child: Text('search'),
                   ),
